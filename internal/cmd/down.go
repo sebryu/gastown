@@ -293,9 +293,9 @@ func runDown(cmd *cobra.Command, args []string) error {
 	}
 
 	// Phase 6: Nuke tmux server (--nuke only)
-	// All towns share the "default" tmux socket (see registry.go InitRegistry),
-	// so --nuke kills the shared server and all sessions on it. Users may also
-	// have opened custom windows/panes, so we require confirmation.
+	// Each town uses a per-town tmux socket derived from the town directory name
+	// (see registry.go InitRegistry), so --nuke only affects this town's server.
+	// Users may also have opened custom windows/panes, so we require confirmation.
 	if downNuke {
 		socket := tmux.GetDefaultSocket()
 		socketLabel := "default"
