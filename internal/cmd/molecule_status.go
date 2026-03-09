@@ -126,6 +126,7 @@ type MoleculeStatusInfo struct {
 	HasWork          bool                  `json:"has_work"`
 	PinnedBead       *beads.Issue          `json:"pinned_bead,omitempty"`
 	AttachedMolecule string                `json:"attached_molecule,omitempty"`
+	AttachedFormula  string                `json:"attached_formula,omitempty"`
 	AttachedAt       string                `json:"attached_at,omitempty"`
 	AttachedArgs     string                `json:"attached_args,omitempty"`
 	IsWisp           bool                  `json:"is_wisp"`
@@ -490,6 +491,7 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 		attachment := beads.ParseAttachmentFields(hookBead)
 		if attachment != nil {
 			status.AttachedMolecule = attachment.AttachedMolecule
+			status.AttachedFormula = attachment.AttachedFormula
 			status.AttachedAt = attachment.AttachedAt
 			status.AttachedArgs = attachment.AttachedArgs
 
@@ -500,6 +502,10 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 				progress, _ := getMoleculeProgressInfo(b, attachment.AttachedMolecule)
 				status.Progress = progress
 				status.NextAction = determineNextAction(status)
+			} else if attachment.AttachedFormula != "" {
+				progress, _ := getMoleculeProgressInfo(b, hookBead.ID)
+				status.Progress = progress
+				status.NextAction = determineNextAction(status)
 			}
 		}
 	}
@@ -507,8 +513,10 @@ func runMoleculeStatus(cmd *cobra.Command, args []string) error {
 	// Determine next action if no work is slung
 	if !status.HasWork {
 		status.NextAction = "Check inbox for work assignments: gt mail inbox"
-	} else if status.AttachedMolecule == "" {
+	} else if status.AttachedMolecule == "" && status.AttachedFormula == "" {
 		status.NextAction = "Attach a molecule to start work: gt mol attach <bead-id> <molecule-id>"
+	} else if status.AttachedFormula != "" && status.NextAction == "" && status.PinnedBead != nil {
+		status.NextAction = "Show the workflow steps: gt prime or bd mol current " + status.PinnedBead.ID
 	}
 
 	// JSON output
@@ -738,6 +746,9 @@ func outputMoleculeStatus(status MoleculeStatusInfo) error {
 	}
 
 	fmt.Printf("%s %s: %s\n", style.Bold.Render("🪝 Hooked:"), status.PinnedBead.ID, status.PinnedBead.Title)
+	if status.AttachedFormula != "" {
+		fmt.Printf("%s %s\n", style.Bold.Render("📐 Formula:"), status.AttachedFormula)
+	}
 
 	// Show attached molecule
 	if status.AttachedMolecule != "" {
@@ -752,7 +763,7 @@ func outputMoleculeStatus(status MoleculeStatusInfo) error {
 		if status.AttachedArgs != "" {
 			fmt.Printf("   %s %s\n", style.Bold.Render("Args:"), status.AttachedArgs)
 		}
-	} else {
+	} else if status.AttachedFormula == "" {
 		fmt.Printf("%s\n", style.Dim.Render("No molecule attached (hooked bead still triggers autonomous work)"))
 	}
 
