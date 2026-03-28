@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -513,6 +514,12 @@ func ShellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
+// psQuote quotes a value for use in PowerShell $env: assignments.
+// Uses single quotes with embedded single quotes doubled ('').
+func psQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
+
 // ExportPrefix builds an export statement prefix for shell commands.
 // Returns a string like "export GT_ROLE=mayor BD_ACTOR=mayor && "
 // The keys are sorted for deterministic output.
@@ -529,11 +536,18 @@ func ExportPrefix(env map[string]string) string {
 	}
 	sort.Strings(keys)
 
+	if runtime.GOOS == "windows" {
+		var parts []string
+		for _, k := range keys {
+			parts = append(parts, fmt.Sprintf("$env:%s=%s", k, psQuote(env[k])))
+		}
+		return strings.Join(parts, "; ") + "; "
+	}
+
 	var parts []string
 	for _, k := range keys {
 		parts = append(parts, fmt.Sprintf("%s=%s", k, ShellQuote(env[k])))
 	}
-
 	return "export " + strings.Join(parts, " ") + " && "
 }
 

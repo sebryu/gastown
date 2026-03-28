@@ -119,13 +119,6 @@ func (m *Manager) Start(agentOverride string) error {
 		case ModeACP, ModeBoth:
 			return ErrACPActive
 		case ModeTMUX:
-			// Return immediately if a TMUX session already exists.
-			// Previously this fell through to StartTMUX which would kill
-			// "zombie" sessions (tmux alive, agent dead) and replace them.
-			// But during handoffs the agent is briefly undetectable, causing
-			// StartTMUX to kill a healthy session and spawn a duplicate.
-			// Callers that need zombie restart should use Stop() + Start()
-			// explicitly (e.g., gt mayor restart).
 			return ErrAlreadyRunning
 		}
 	}

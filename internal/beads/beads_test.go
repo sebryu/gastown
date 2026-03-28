@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -2948,20 +2947,15 @@ func TestBdBranch_SystemScenario_FilterBeadsEnvIsolation(t *testing.T) {
 	t.Setenv("BEADS_DIR", "/tmp/filter-test-beads")
 	t.Setenv("GT_ROOT", "/tmp/filter-test-gt")
 
-	cmd := exec.Command("env")
-	cmd.Env = filterBeadsEnv(os.Environ())
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("env command failed: %v", err)
-	}
+	filtered := filterBeadsEnv(os.Environ())
 
-	output := string(out)
-	// Note: HOME= is stripped by filterBeadsEnv, but on macOS the kernel may
-	// re-inject HOME into subprocesses. Only check beads-specific vars here.
+	// Verify beads-specific vars are stripped from the filtered env.
 	forbidden := []string{"BD_ACTOR=", "BEADS_DIR=", "GT_ROOT="}
-	for _, prefix := range forbidden {
-		if strings.Contains(output, prefix) {
-			t.Errorf("filterBeadsEnv subprocess still contains %s", prefix)
+	for _, entry := range filtered {
+		for _, prefix := range forbidden {
+			if strings.HasPrefix(entry, prefix) {
+				t.Errorf("filterBeadsEnv result still contains %s", entry)
+			}
 		}
 	}
 }

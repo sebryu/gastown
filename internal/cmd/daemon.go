@@ -12,6 +12,7 @@ import (
 	"github.com/steveyegge/gastown/internal/daemon"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/templates"
+	"github.com/steveyegge/gastown/internal/util"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
@@ -192,6 +193,7 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 	daemonCmd.Stdin = nil
 	daemonCmd.Stdout = nil
 	daemonCmd.Stderr = nil
+	util.SetDetachedProcessGroup(daemonCmd)
 
 	if err := daemonCmd.Start(); err != nil {
 		return fmt.Errorf("starting daemon: %w", err)

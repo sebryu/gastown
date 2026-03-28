@@ -735,7 +735,10 @@ func executeKeychainRotation(
 	// The keychain swap already replaced the auth token in this dir's keychain entry.
 	// Set GT_QUOTA_ACCOUNT so the scanner knows which account's token is actually active
 	// (the config dir still maps to the old account).
-	restartCmd = fmt.Sprintf("export CLAUDE_CONFIG_DIR=%q && export GT_QUOTA_ACCOUNT=%q && %s", currentConfigDir, newAccount, restartCmd)
+	restartCmd = config.PrependEnv(restartCmd, map[string]string{
+		"CLAUDE_CONFIG_DIR": currentConfigDir,
+		"GT_QUOTA_ACCOUNT":  newAccount,
+	})
 
 	// Get target pane
 	pane, err := t.GetPaneID(session)

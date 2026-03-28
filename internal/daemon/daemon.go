@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -1904,18 +1903,18 @@ func StopDaemon(townRoot string) error {
 		return fmt.Errorf("finding process: %w", err)
 	}
 
-	// Send SIGTERM for graceful shutdown
-	if err := process.Signal(syscall.SIGTERM); err != nil {
-		return fmt.Errorf("sending SIGTERM: %w", err)
+	// Send termination signal for graceful shutdown
+	if err := sendTermSignal(process); err != nil {
+		return fmt.Errorf("sending termination signal: %w", err)
 	}
 
 	// Wait a bit for graceful shutdown
 	time.Sleep(constants.ShutdownNotifyDelay)
 
 	// Check if still running
-	if err := process.Signal(syscall.Signal(0)); err == nil {
+	if isProcessAlive(process) {
 		// Still running, force kill
-		_ = process.Signal(syscall.SIGKILL)
+		_ = sendKillSignal(process)
 	}
 
 	// Clean up PID file
@@ -1965,7 +1964,7 @@ func FindOrphanedDaemons(townRoot string) ([]int, error) {
 	if findErr != nil {
 		return nil, nil
 	}
-	if process.Signal(syscall.Signal(0)) != nil {
+	if !isProcessAlive(process) {
 		// PID file exists but process is dead — stale PID file with held lock.
 		// This shouldn't happen (lock should release on process death), but
 		// report the stale PID for cleanup.
@@ -1991,8 +1990,8 @@ func KillOrphanedDaemons(townRoot string) (int, error) {
 			continue
 		}
 
-		// Try SIGTERM first
-		if err := process.Signal(syscall.SIGTERM); err != nil {
+		// Try termination signal first
+		if err := sendTermSignal(process); err != nil {
 			continue
 		}
 
@@ -2000,9 +1999,9 @@ func KillOrphanedDaemons(townRoot string) (int, error) {
 		time.Sleep(200 * time.Millisecond)
 
 		// Check if still alive
-		if err := process.Signal(syscall.Signal(0)); err == nil {
+		if isProcessAlive(process) {
 			// Still alive, force kill
-			_ = process.Signal(syscall.SIGKILL)
+			_ = sendKillSignal(process)
 		}
 
 		killed++
@@ -2228,6 +2227,7 @@ func (d *Daemon) emitMassDeathEvent() {
 // of crash detection rather than silently suppressing alerts.
 func (d *Daemon) isBeadClosed(beadID string) bool {
 	cmd := exec.Command(d.bdPath, "show", beadID, "--json") //nolint:gosec // G204: args are constructed internally
+	setSysProcAttr(cmd)
 	cmd.Dir = d.config.TownRoot
 	cmd.Env = os.Environ()
 
@@ -2282,8 +2282,9 @@ Restart deferred to stuck-agent-dog plugin for context-aware recovery.`,
 		polecatName, hookBead)
 
 	cmd := exec.Command(d.gtPath, "mail", "send", witnessAddr, "-s", subject, "-m", body) //nolint:gosec // G204: args are constructed internally
+	setSysProcAttr(cmd)
 	cmd.Dir = d.config.TownRoot
-	cmd.Env = append(os.Environ(), "BD_ACTOR=daemon") // Identify as daemon, not overseer
+	cmd.Env = append(os.Environ(), "BD_ACTOR=daemon")// Identify as daemon, not overseer
 	if err := cmd.Run(); err != nil {
 		d.logger.Printf("Warning: failed to notify witness of crashed polecat: %v", err)
 	}
@@ -2495,6 +2496,7 @@ func (d *Daemon) dispatchQueuedWork() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "gt", "scheduler", "run")
+	setSysProcAttr(cmd)
 	cmd.Dir = d.config.TownRoot
 	cmd.Env = append(os.Environ(), "GT_DAEMON=1", "BD_DOLT_AUTO_COMMIT=off")
 	out, err := cmd.CombinedOutput()
