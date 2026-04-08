@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/estop"
 	"github.com/steveyegge/gastown/internal/quota"
 	"github.com/steveyegge/gastown/internal/style"
 	ttmux "github.com/steveyegge/gastown/internal/tmux"
@@ -838,8 +839,10 @@ func runQuotaWatch(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("no accounts configured: %w", err)
 	}
-	if len(acctCfg.Accounts) < 2 {
-		return fmt.Errorf("need at least 2 accounts for rotation (have %d)", len(acctCfg.Accounts))
+	singleAccountMode := len(acctCfg.Accounts) < 2
+	if singleAccountMode {
+		fmt.Printf(" %s Single account — will E-stop on limit detection (no rotation possible)\n",
+			style.Warning.Render("Watch:"))
 	}
 
 	fmt.Printf(" %s Watching for near-limit signals (interval: %s)\n",
@@ -932,7 +935,31 @@ func runWatchCycle(townRoot string, acctCfg *config.AccountsConfig) {
 			style.Dim.Render(detail))
 	}
 
-	if watchDryRun || len(plan.Assignments) == 0 {
+	if watchDryRun {
+		return
+	}
+
+	// If sessions need attention but no backup accounts are available,
+	// trigger an emergency stop instead of attempting (impossible) rotation.
+	if totalTargets > 0 && len(plan.AvailableAccounts) == 0 {
+		reason := fmt.Sprintf("quota watch: %d session(s) at/near limit, no backup accounts for rotation", totalTargets)
+		if err := estop.Activate(townRoot, estop.TriggerAuto, reason); err != nil {
+			style.PrintWarning("failed to trigger E-stop: %v", err)
+			return
+		}
+		fmt.Printf("\n [%s] %s EMERGENCY STOP — no backup accounts available\n",
+			style.Dim.Render(now), style.Error.Render("⛔"))
+
+		if t.IsAvailable() {
+			frozen := freezeAllSessions(t, townRoot, "")
+			fmt.Printf(" [%s] %s %d session(s) frozen\n",
+				style.Dim.Render(now), style.Error.Render("⛔"), frozen)
+		}
+		fmt.Printf("    Resume with: %s\n", style.Bold.Render("gt thaw"))
+		return
+	}
+
+	if len(plan.Assignments) == 0 {
 		return
 	}
 
