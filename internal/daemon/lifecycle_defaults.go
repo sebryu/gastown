@@ -58,6 +58,10 @@ func DefaultLifecycleConfig() *DaemonPatrolConfig {
 				IntervalStr: "30m",
 				TimeoutStr:  "10m",
 			},
+			QuotaDog: &QuotaDogConfig{
+				Enabled:     true,
+				IntervalStr: "5m",
+			},
 			Handler: &PatrolConfig{
 				Enabled: true,
 			},
@@ -116,6 +120,10 @@ func EnsureLifecycleDefaults(config *DaemonPatrolConfig) bool {
 	}
 	if p.MainBranchTest == nil {
 		p.MainBranchTest = d.MainBranchTest
+		changed = true
+	}
+	if p.QuotaDog == nil {
+		p.QuotaDog = d.QuotaDog
 		changed = true
 	}
 	if p.Handler == nil {

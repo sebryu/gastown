@@ -5,6 +5,12 @@ import (
 	"context"
 	"os/exec"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/estop"
+	"github.com/steveyegge/gastown/internal/quota"
+	ttmux "github.com/steveyegge/gastown/internal/tmux"
 )
 
 const (
@@ -74,5 +80,66 @@ func (d *Daemon) runQuotaDog() {
 		d.logger.Printf("quota_dog: rotation result: %s", outStr)
 	} else {
 		d.logger.Printf("quota_dog: no rate-limited sessions detected")
+	}
+
+	// After rotation attempt, scan for near-limit sessions.
+	// If sessions are at/near limit and no backup accounts exist, trigger estop.
+	d.checkNearLimitEstop()
+}
+
+// checkNearLimitEstop scans sessions for near-limit signals and triggers an
+// emergency stop if no backup accounts are available for rotation.
+func (d *Daemon) checkNearLimitEstop() {
+	if estop.IsActive(d.config.TownRoot) {
+		return // Already estopped
+	}
+
+	accountsPath := constants.MayorAccountsPath(d.config.TownRoot)
+	acctCfg, err := config.LoadAccountsConfig(accountsPath)
+	if err != nil {
+		return // No accounts configured
+	}
+
+	t := ttmux.NewTmux()
+	if !t.IsAvailable() {
+		return
+	}
+
+	scanner, err := quota.NewScanner(t, nil, acctCfg)
+	if err != nil {
+		d.logger.Printf("quota_dog: near-limit scanner: %v", err)
+		return
+	}
+	if err := scanner.WithWarningPatterns(nil); err != nil {
+		d.logger.Printf("quota_dog: warning patterns: %v", err)
+		return
+	}
+
+	mgr := quota.NewManager(d.config.TownRoot)
+	plan, err := quota.PlanRotation(scanner, mgr, acctCfg, quota.PlanOpts{IncludeNearLimit: true})
+	if err != nil {
+		d.logger.Printf("quota_dog: near-limit plan: %v", err)
+		return
+	}
+
+	totalTargets := len(plan.LimitedSessions) + len(plan.NearLimitSessions)
+	if totalTargets == 0 || len(plan.AvailableAccounts) > 0 {
+		return // Either all clear, or rotation can handle it
+	}
+
+	reason := "quota_dog: session(s) at/near subscription limit, no backup accounts for rotation"
+	d.logger.Printf("quota_dog: triggering E-stop — %d session(s) at/near limit, 0 backup accounts", totalTargets)
+	if err := estop.Activate(d.config.TownRoot, estop.TriggerAuto, reason); err != nil {
+		d.logger.Printf("quota_dog: failed to activate E-stop: %v", err)
+		return
+	}
+
+	// Freeze all sessions (estop sentinel alone isn't enough — need SIGTSTP)
+	ctx, cancel := context.WithTimeout(d.ctx, 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, d.gtPath, "estop", "-r", reason) //nolint:gosec // G204: gtPath resolved at daemon init
+	cmd.Dir = d.config.TownRoot
+	if out, err := cmd.CombinedOutput(); err != nil {
+		d.logger.Printf("quota_dog: estop command failed: %v: %s", err, string(out))
 	}
 }
